@@ -1,0 +1,28 @@
+<idea-plugin>
+    <id>org.JetBrains.IntelliJ</id>
+    <name>IntelliJTypilus</name>
+    <vendor email="yalman.ahadi@hotmail.com" url="http://www.jetbrains.com">Jet Brains</vendor>
+
+    <description><![CDATA[
+    This plugin integrates the use of Typilus within IntelliJ's PyCharm plugin which provides
+    type hints to the programmer.
+    ]]></description>
+
+    <!-- please see https://www.jetbrains.org/intellij/sdk/docs/basics/getting_started/plugin_compatibility.html
+         on how to target different products -->
+    <!--depends>com.intellij.modules.platform</depends -->
+    <depends>com.intellij.modules.lang</depends>
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.python-core-capable</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Add your extensions here -->
+
+    </extensions>
+
+    <actions>
+        <action id="com.jetbrains.intellijTypilus.Action" class="com.jetbrains.intellijTypilus.intelliJTypilus" text="Get Type Hints">
+            <add-to-group group-id="ToolbarRunGroup" anchor = "last"/>
+        </action>
+    </actions>
+</idea-plugin>
