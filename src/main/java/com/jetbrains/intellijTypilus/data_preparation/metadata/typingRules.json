@@ -1,0 +1,9 @@
+{
+  "aliasing_rules": [
+    [
+      "str",
+      "typing.Text"
+    ]
+  ]
+
+}

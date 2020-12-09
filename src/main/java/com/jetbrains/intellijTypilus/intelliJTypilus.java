@@ -4,6 +4,7 @@ import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.LangDataKeys;
 import com.intellij.psi.*;
+import com.jetbrains.intellijTypilus.data_preparation.scripts.graph_generator.GraphGenerator;
 import com.jetbrains.python.psi.PyTypedElement;
 import com.jetbrains.python.psi.types.PyType;
 import com.jetbrains.python.psi.impl.PyTypeProvider;
@@ -21,7 +22,11 @@ public class intelliJTypilus extends AnAction{
         PsiFile psiFile = e.getData(LangDataKeys.PSI_FILE);
         ArrayList<String> children = null;
         if (psiFile != null) {
-            System.out.println(psiFile.getFirstChild().getText());
+            GraphGenerator graphGenerator = new GraphGenerator(e);
+            graphGenerator.build();
+            System.out.println(graphGenerator.toString());
+            graphGenerator.visit(psiFile);
+            System.out.println(graphGenerator.nodeToId);
             //TypeEvalContext context =
             //context.allowCallContext(psiFile.getFirstChild());
             //context.getType((PyTypedElement) psiFile.getFirstChild());
