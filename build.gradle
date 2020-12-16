@@ -1,9 +1,11 @@
+import sun.nio.cs.ext.PCK
+
 plugins {
     id 'java'
-    id 'org.jetbrains.intellij' version '0.6.0'
+    id 'org.jetbrains.intellij' version '0.6.5'
 }
 
-group 'org.example'
+group 'com.intellij.sdk'
 version '1.0-SNAPSHOT'
 
 repositories {
@@ -12,8 +14,9 @@ repositories {
 
 dependencies {
     testCompile group: 'junit', name: 'junit', version: '4.12'
-    compile group: 'com.github.adedayo.intellij.sdk', name: 'python-psi-api', version: '142.1'
+    //compile group: 'com.github.adedayo.intellij.sdk', name: 'python-psi-impl', version: '142.1'
     compile group: 'org.javatuples', name: 'javatuples', version: '1.2'
+    //compile group: 'com.github.adedayo.intellij.sdk', name:'python-community', version: '142.1'
 }
 
 // See https://github.com/JetBrains/gradle-intellij-plugin/
@@ -21,6 +24,7 @@ intellij {
     version '2020.2.3'
     type = 'PC'
     downloadSources = false
+    plugins 'PythonCore'
 
 }
 patchPluginXml {

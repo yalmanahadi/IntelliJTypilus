@@ -10,6 +10,10 @@ public class TokenNode {
         this.colOffset = colOffset;
     }
 
+    TokenNode(String token){
+       this.token = token;
+    }
+
     public String toString(){
         return this.token;
     }
