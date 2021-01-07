@@ -11,13 +11,13 @@ import java.util.Map;
 
 public class SymbolInformation {
     String name;
-    ArrayList<Pair<Integer, Integer>> locations;
-    HashMap<Pair<Integer, Integer>, TypeAnnotationNode> annotatableLocations;
+    ArrayList<Integer> locations;
+    HashMap<Integer, TypeAnnotationNode> annotatableLocations;
     String symbolType;
 
     SymbolInformation(String name,
-                      ArrayList<Pair<Integer, Integer>> locations,
-                      HashMap<Pair<Integer, Integer>, TypeAnnotationNode> annotatableLocations,
+                      ArrayList<Integer> locations,
+                      HashMap<Integer, TypeAnnotationNode> annotatableLocations,
                       String symbolType){
         this.name = name;
         this.locations = locations;
@@ -27,8 +27,8 @@ public class SymbolInformation {
     static SymbolInformation create(String name, String symbolType){
         Pair<Integer, Integer> pair = null;
         return new SymbolInformation(name,
-                new ArrayList<Pair<Integer, Integer>>(),
-                new HashMap<Pair<Integer, Integer>, TypeAnnotationNode>(),
+                new ArrayList<Integer>(),
+                new HashMap<Integer, TypeAnnotationNode>(),
                 symbolType);
     }
 

@@ -19,7 +19,6 @@ public class intelliJTypilus extends AnAction{
         if (psiFile != null) {
             GraphGenerator graphGenerator = new GraphGenerator(e);
             graphGenerator.build();
-            System.out.println(graphGenerator.toString());
             graphGenerator.visit(psiFile);
             System.out.println(graphGenerator.nodeToId);
             //TypeEvalContext context =

@@ -2,12 +2,10 @@ package com.jetbrains.intellijTypilus.data_preparation.scripts.graph_generator;
 
 public class TokenNode {
     String token;
-    int lineno;
-    int colOffset;
-    TokenNode(String token, int lineno, int colOffset){
+    int startOffset;
+    TokenNode(String token, int startOffset){
         this.token = token;
-        this.lineno = lineno;
-        this.colOffset = colOffset;
+        this.startOffset = startOffset;
     }
 
     TokenNode(String token){
