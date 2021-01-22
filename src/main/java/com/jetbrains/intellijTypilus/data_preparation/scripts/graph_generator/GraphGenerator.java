@@ -311,7 +311,9 @@ public class GraphGenerator {
             }
             else if (part instanceof PyElsePartImpl){
                 this.addTerminal(new TokenNode("else"));
-                this.visitPyStatementList(part);
+                for (PsiElement child: part.getChildren()){
+                    visit(child);
+                }
             }
         }
         if (elifPart) this.addTerminal(new TokenNode(this.DEDENT));
