@@ -2,12 +2,11 @@ package com.jetbrains.intellijTypilus.data_preparation.scripts.graph_generator;
 
 
 
-import com.jetbrains.intellijTypilus.data_preparation.scripts.graph_generator.typeparsing.TypeAnnotationNode;
+import com.jetbrains.intellijTypilus.data_preparation.scripts.graph_generator.typeparsing.nodes.TypeAnnotationNode;
 import org.javatuples.Pair;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Map;
 
 public class SymbolInformation {
     String name;

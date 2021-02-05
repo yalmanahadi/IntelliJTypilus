@@ -7,12 +7,12 @@ import com.intellij.psi.PsiReference;
 import com.intellij.psi.impl.source.tree.PsiWhiteSpaceImpl;
 import com.intellij.psi.search.SearchScope;
 import com.intellij.psi.util.PsiElementFilter;
-import com.jetbrains.intellijTypilus.data_preparation.scripts.graph_generator.typeparsing.TypeAnnotationNode;
+import com.jetbrains.intellijTypilus.data_preparation.scripts.graph_generator.typeparsing.nodes.TypeAnnotationNode;
 import com.jetbrains.python.PyTokenTypes;
-import com.jetbrains.python.psi.PyElementType;
-import com.jetbrains.python.psi.PyExpression;
+import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.impl.*;
 import com.intellij.psi.util.PsiTreeUtil;
+import javafx.util.Pair;
 import org.jetbrains.annotations.NotNull;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -25,14 +25,15 @@ public class GraphGenerator {
     LinkedHashMap<String, Object> graph = new LinkedHashMap<String, Object>();
     //LinkedHashMap<EdgeType, LinkedHashMap<Integer, Set<Integer>>> edges;
     ArrayList<Object> idToNode = new ArrayList<>();
-    ArrayList<SearchScope> scopes = new ArrayList<>();
+    ArrayList<HashMap<String, Pair<PsiElement, Symbol>>> scopes = new ArrayList<>();
+    PsiElement returnScope = null;
     TokenNode prevTokenNode = null;
     ArrayList<TokenNode> backboneSequence = new ArrayList<>();
     public LinkedHashMap<Object, Integer> nodeToId = new LinkedHashMap<>();
     public PsiFile psiFile = null;
     public PsiElement currentParentNode = null;
-    HashMap<PsiElement, TokenNode> extractedTokenNodes = new HashMap<>();
-    HashMap<PsiElement, Symbol> extractedSymbols = new HashMap<>();
+    HashMap<PsiElement, TokenNode> extractedTokenNodes;
+    HashMap<String, Pair<PsiElement, Symbol>> currentExtractedSymbols = new HashMap<>();
     String INDENT = "<INDENT>";
     String DEDENT = "<DEDENT>";
     String INLINE = "<NL>";
@@ -80,8 +81,7 @@ public class GraphGenerator {
         this.psiFile = e.getData(LangDataKeys.PSI_FILE);
 //        this.context = TypeEvalContext.userInitiated(psiFile.getProject(), psiFile);
         assert this.psiFile != null;
-        this.scopes.add(this.psiFile.getUseScope());
-
+        makeNewScope();
     }
 
     public GraphGenerator() {}
@@ -109,15 +109,29 @@ public class GraphGenerator {
         return graph.toString();
     }
 
-    private void getScopeElements(PsiElement node){
-        PsiElement[] items = PsiTreeUtil.collectElements(node, new PsiElementFilter() {
+    private PsiElement[] getScopeElements(PsiElement node){
+        PsiElement[] items = PsiTreeUtil.collectElements(node.getFirstChild(), new PsiElementFilter() {
             @Override
             public boolean isAccepted(@NotNull PsiElement psiElement) {
-                if (psiElement.getNavigationElement() != null) {
+                PyBaseElementImpl pyBaseElement = (PyBaseElementImpl) psiElement;
+                if (((PyBaseElementImpl<?>) psiElement).getElementType() != null) {
+                    return true;
                 }
-                return true;
+                return false;
             }
         });
+        return items;
+    }
+
+    void makeNewScope(){
+        HashMap<String, Pair<PsiElement, Symbol>> newScope = new HashMap<>();
+        this.scopes.add(newScope);
+        this.currentExtractedSymbols = newScope;
+    }
+
+    void exitScope(){
+        this.currentExtractedSymbols = this.scopes.get(this.scopes.size()-2);
+        this.scopes.remove(this.scopes.size()-1);
     }
 
     public void visit(PsiElement node) {
@@ -165,11 +179,19 @@ public class GraphGenerator {
         if(node instanceof PyAssignmentStatementImpl){
             PyAssignmentStatementImpl assignNode = (PyAssignmentStatementImpl) node;
             Iterator<PyExpression> iterator = Arrays.asList((assignNode.getRawTargets())).iterator();
+            int i = 0;
             while(iterator.hasNext()){
-                PsiElement item = iterator.next();
-                this.visit(item);
-                System.out.println(item.getText());
+                PsiElement target = iterator.next();
+                this.visit(target);
+                if (i > 0) {
+                    this.addEdge(target,assignNode.getAssignedValue(), EdgeType.NEXT);
+                }
+                this.addEdge(target, assignNode.getAssignedValue(), EdgeType.COMPUTED_FROM);
+                if (i <  assignNode.getRawTargets().length - 1){
+                    this.addTerminal(new TokenNode(","));
+                }
                 //this.visitVariableLike(item, item.getTextOffset(), true, null, node.getUseScope());
+                i += 1;
             }
             this.addTerminal(new TokenNode("="));
             this.visit(assignNode.getAssignedValue());
@@ -197,21 +219,28 @@ public class GraphGenerator {
     }
 
     void visitPyTargetExpression(PsiElement target){
-        if (target.getChildren().length == 0) { //when just assigning a raw value to a variable
-            PyTargetExpressionImpl expression = (PyTargetExpressionImpl) target;
-            this.visitVariableLike(target, target.getTextOffset(), true, null, target.getUseScope());
-            System.out.println(target.getFirstChild().getClass());
+        PyTargetExpressionImpl targetExpression = (PyTargetExpressionImpl) target;
+        if (targetExpression.getChildren().length == 0) { //when just assigning a raw value to a variable
+            if (!this.currentExtractedSymbols.containsKey(targetExpression.getReferencedName())) {
+                this.currentExtractedSymbols.put(targetExpression.getReferencedName(), new Pair<>(targetExpression, new Symbol(targetExpression)));
+            }
+            this.visitVariableLike(targetExpression, targetExpression.getTextOffset(), true, null, targetExpression.getUseScope());
         }
-        else if (target.getChildren().length > 0){
+        else if (targetExpression.getChildren().length > 0){
 
         }
 
-        System.out.println(((PyTargetExpressionImpl)target).getName());
     }
 
 
-    void visitPyReferenceExpression(PsiElement node){
-        this.visitVariableLike(node, node.getTextOffset(), false, null, node.getUseScope());
+    void visitPyReferenceExpression(PsiElement referenceExpressionNode) {
+        if (referenceExpressionNode instanceof PyReferenceExpressionImpl) {
+            PyReferenceExpressionImpl referenceExpression = (PyReferenceExpressionImpl) referenceExpressionNode;
+            if (!this.currentExtractedSymbols.containsKey(referenceExpression.getReferencedName())) {
+                this.currentExtractedSymbols.put(referenceExpression.getReferencedName(), new Pair<>(referenceExpression, new Symbol(referenceExpression)));
+            }
+            this.visitVariableLike(referenceExpression, referenceExpression.getTextOffset(), false, null, referenceExpression.getUseScope());
+        }
     }
     
     void visitNameAnnotatable(PsiElement node, int startOffset, boolean canAnnotateHere, TypeAnnotationNode typeAnnotationNode, SearchScope nodeScope){
@@ -219,9 +248,7 @@ public class GraphGenerator {
         PsiElement parent = this.currentParentNode;
         this.currentParentNode = node;
         try{
-            System.out.println(123);
             this.visitVariableLike(node, startOffset, canAnnotateHere, typeAnnotationNode, node.getUseScope());
-            System.out.println(321);
         }finally {
             this.currentParentNode = parent;
         }
@@ -232,26 +259,27 @@ public class GraphGenerator {
         HashMap<String, Object> results = getSymbolForName(node, startOffset);
         TokenNode newNode = (TokenNode)results.get("node");
         Symbol symbol = (Symbol)results.get("symbol");
-        if (newNode != null){
+        if (newNode != null && symbol != null){
             this.addEdge(newNode, symbol, EdgeType.OCCURRENCE_OF);
         }
+
     }
 
     HashMap<String, Object> getSymbolForName(PsiElement node, int startOffset){
         HashMap<String,Object> results = new HashMap<>();
         TokenNode newNode = new TokenNode(node.getText(), startOffset);
         this.addTerminal(newNode);
-        this.extractedTokenNodes.put(node, newNode);
-        this.extractedSymbols.put(node, new Symbol(node));
+        //this.extractedTokenNodes.put(node, newNode);
+        //if(!this.currentExtractedSymbols.containsKey(node)) this.currentExtractedSymbols.put(node, new Symbol(node));
         //this.addTerminal(newNode);
         //TODO special underscored items
         results.put("node", newNode);
 
         Symbol symbol = getScopeSymbol(node);
-
+        System.out.println("here");
+        System.out.println(this.currentExtractedSymbols);
         if (symbol != null) results.put("symbol", symbol);
 
-        System.out.println(results);
         return results;
     }
     //returns [name, node, symbol, symbolType]
@@ -274,11 +302,24 @@ public class GraphGenerator {
     Symbol getScopeSymbol(PsiElement node){
         for (int i = this.scopes.size(); i >= 0; i--) {
             PsiReference reference = node.getReference();
-            assert reference != null;
-            return this.extractedSymbols.get(reference.resolve());
+            // resolve a variable reference, or find function, or find parameters
+            if (reference != null ||
+                    node.getParent().getClass() == PyFunctionImpl.class ||
+                    node.getClass() == PyNamedParameterImpl.class
+            ) {
+                for (Map.Entry<String, Pair<PsiElement, Symbol>> entry : this.currentExtractedSymbols.entrySet()){
+                    if (entry.getKey().equals(node.getText())){
+                        return entry.getValue().getValue(); //returns the corresponding Symbol
+                    }
+                }
+            }
         }
+        System.out.println("printing null node");
+        System.out.println(node.getText());
         return null;
     }
+
+
 
 
     void visitPyNumericLiteralExpression(PsiElement node){
@@ -324,15 +365,15 @@ public class GraphGenerator {
     }
 
     void visitPyBinaryExpression(PsiElement node){
-        PyBinaryExpressionImpl castedNode = (PyBinaryExpressionImpl)node;
-        this.visit(castedNode.getLeftExpression());
-        if (CMPOPS.containsKey(castedNode.getOperator())) {
-            this.addTerminal(new TokenNode(this.CMPOPS.get(castedNode.getOperator())));
+        PyBinaryExpressionImpl binaryExpression = (PyBinaryExpressionImpl)node;
+        this.visit(binaryExpression.getLeftExpression());
+        if (CMPOPS.containsKey(binaryExpression.getOperator())) {
+            this.addTerminal(new TokenNode(this.CMPOPS.get(binaryExpression.getOperator())));
         }
-        else if (BINOPS.containsKey(castedNode.getOperator())){
-            this.addTerminal(new TokenNode(this.BINOPS.get(castedNode.getOperator())));
+        else if (BINOPS.containsKey(binaryExpression.getOperator())){
+            this.addTerminal(new TokenNode(this.BINOPS.get(binaryExpression.getOperator())));
         }
-        this.visit(castedNode.getRightExpression());
+        this.visit(binaryExpression.getRightExpression());
     }
 
     void visitPyIfPartIf(PsiElement node){
@@ -342,10 +383,6 @@ public class GraphGenerator {
         }
     }
 
-//    void visitPyIfPartElif(PsiElement node){
-//        this.addTerminal(new TokenNode("else"));
-//
-//    }
 
     void visitPyStatementList(PsiElement node){
         PsiElement[] statements = node.getChildren();
@@ -387,8 +424,6 @@ public class GraphGenerator {
     }
 
     int nodeID(PsiElement node){
-        //assert needed maybe
-
         if (this.nodeToId.get(node) == null){
             int idx = this.nodeToId.size();
             assert (idToNode.size() == nodeToId.size());
@@ -408,8 +443,6 @@ public class GraphGenerator {
     }
 
     int nodeID(Symbol node) {
-        //assert needed maybe
-
         if (this.nodeToId.get(node) == null) {
             int idx = this.nodeToId.size();
             assert (idToNode.size() == nodeToId.size());
@@ -489,6 +522,144 @@ public class GraphGenerator {
         }
         System.out.println(this.graph);
 
+    }
+
+    //Region: PyFunctions
+
+    void visitPyFunction(PsiElement node){
+        this.visitFunction(node, false);
+    }
+
+    void visitFunction(PsiElement node, boolean async){
+        if (node instanceof PyFunctionImpl){
+            PyFunctionImpl funcNode = (PyFunctionImpl) node;
+            if (funcNode.getDecoratorList() != null) {
+                for (PyDecorator decorator : funcNode.getDecoratorList().getDecorators()) {
+                    this.addTerminal(new TokenNode("@"));
+                    this.visit(decorator);
+                }
+            }
+            if (async){
+                this.addTerminal(new TokenNode("async"));
+            }
+            this.addTerminal(new TokenNode("def"));
+
+            //TODO: returns
+            if (!this.currentExtractedSymbols.containsKey(funcNode.getName())) {
+                this.currentExtractedSymbols.put(funcNode.getName(), new Pair<>(funcNode, new Symbol(funcNode)));
+            }
+            this.visitVariableLike(funcNode.getNameIdentifier() , node.getTextOffset(), true, null, node.getUseScope());
+            PsiElement oldReturnScope = this.returnScope;
+            makeNewScope();
+            try {
+                this.addTerminal(new TokenNode("("));
+                this.visit(funcNode.getParameterList());
+                this.addTerminal(new TokenNode(")"));
+                this.returnScope = node;
+                this.visitPyStatementList(funcNode.getStatementList());
+            }
+            finally {
+                this.returnScope = oldReturnScope;
+                exitScope();
+            }
+        }
+
+    }
+
+    void visitPyParameterList(PsiElement node){
+        PyParameterListImpl parameterListNode = (PyParameterListImpl) node;
+        if (parameterListNode != null) {
+            int i = 0;
+            for (PyParameter parameter :parameterListNode.getParameters()){
+                this.visit(parameter);
+                //TODO: if default not Null?
+                this.addTerminal(new TokenNode(","));
+                if (i > 0){
+                    this.addEdge(parameterListNode.getParameters()[i-1], parameter, EdgeType.NEXT);
+                }
+                i += 1;
+            }
+        }
+    }
+
+    void visitPyNamedParameter(PsiElement node){
+        PyNamedParameterImpl namedParameter = (PyNamedParameterImpl) node;
+        if (namedParameter != null){
+            TypeAnnotationNode annotationNode = null;
+            if (namedParameter.getAnnotation() != null){
+                //TODO: parseTypeAnnotationNode(node.annotation)
+                //TODO: parseTypeComment(node.type_comment)
+            }
+            if (!this.currentExtractedSymbols.containsKey(namedParameter.getName())) {
+                this.currentExtractedSymbols.put(namedParameter.getName(), new Pair<>(namedParameter, new Symbol(namedParameter)));
+            }
+            this.visitVariableLike(namedParameter, namedParameter.getTextOffset(), true, null, node.getUseScope());
+        }
+    }
+
+    void visitPyReturnStatement(PsiElement returnNode){
+        this.addEdge(returnNode, this.returnScope, EdgeType.RETURNS_TO);
+        this.addTerminal(new TokenNode("return"));
+        for (PsiElement returnElement : returnNode.getChildren()){
+            this.visit(returnElement);
+        }
+    }
+
+    //End Region: PyFunctions
+
+    //Region: Control Flow
+
+    void visitPyBreakStatement(PsiElement breakNode){
+        this.addTerminal(new TokenNode("break"));
+    }
+
+    void visitPyContinueStatement(PsiElement continueNode){
+        this.addTerminal(new TokenNode("continue"));
+    }
+
+    void visitPyForStatement(PsiElement pyForStatement){
+        if (pyForStatement instanceof PyForStatementImpl) {
+            PyForStatementImpl forStatement = (PyForStatementImpl) pyForStatement;
+            if (forStatement.isAsync()) {
+                this.addTerminal(new TokenNode("async"));
+                this.visitForStatement(forStatement);
+            }
+            else{
+                visitForStatement(forStatement);
+            }
+        }
+    }
+    void visitForStatement(PyForStatementImpl forStatement){
+        this.visitFor(forStatement.getForPart());
+    }
+    void visitFor(PsiElement forLoop){
+        if (forLoop instanceof PyForPartImpl) {
+            PyForPartImpl forPart = (PyForPartImpl) forLoop;
+            this.addTerminal(new TokenNode("for"));
+            this.visit(forPart.getTarget());
+            this.addTerminal(new TokenNode("in"));
+            this.visit(forPart.getSource());
+            this.addEdge(forPart.getTarget(), forPart.getSource(), EdgeType.COMPUTED_FROM);
+            this.visit(forPart.getStatementList());
+        }
+
+    }
+
+    void visitPyCallExpression(PsiElement callExpressionNode){
+        if (callExpressionNode instanceof PyCallExpressionImpl){
+            PyCallExpressionImpl callExpression = (PyCallExpressionImpl) callExpressionNode;
+            this.visit(callExpression.getCallee());
+            this.addTerminal(new TokenNode("("));
+            int addedArgs = 0;
+            for (PsiElement argument : callExpression.getArguments()) {
+                this.visit(argument);
+                addedArgs += 1;
+                if (addedArgs < callExpression.getArguments().length){
+                    this.addTerminal(new TokenNode(","));
+                }
+            }
+            this.addTerminal(new TokenNode(")"));
+        }
     }
 
 }
