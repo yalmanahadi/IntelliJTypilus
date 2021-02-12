@@ -4,6 +4,7 @@ import com.intellij.openapi.actionSystem.LangDataKeys;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiReference;
+import com.intellij.psi.impl.source.tree.LeafPsiElement;
 import com.intellij.psi.impl.source.tree.PsiWhiteSpaceImpl;
 import com.intellij.psi.search.SearchScope;
 import com.intellij.psi.util.PsiElementFilter;
@@ -12,7 +13,7 @@ import com.jetbrains.python.PyTokenTypes;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.impl.*;
 import com.intellij.psi.util.PsiTreeUtil;
-import javafx.util.Pair;
+import com.intellij.openapi.util.Pair;
 import org.jetbrains.annotations.NotNull;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -79,9 +80,8 @@ public class GraphGenerator {
 
     public GraphGenerator(AnActionEvent e){
         this.psiFile = e.getData(LangDataKeys.PSI_FILE);
-//        this.context = TypeEvalContext.userInitiated(psiFile.getProject(), psiFile);
         assert this.psiFile != null;
-        makeNewScope();
+        makeNewScope(); //create top level scope
     }
 
     public GraphGenerator() {}
@@ -135,7 +135,9 @@ public class GraphGenerator {
     }
 
     public void visit(PsiElement node) {
-        if (node instanceof PsiWhiteSpaceImpl){ // node.getText().length() == 1){
+
+        //ignore whitespaces
+        if (node instanceof PsiWhiteSpaceImpl){
             return;
         }
 
@@ -309,7 +311,7 @@ public class GraphGenerator {
             ) {
                 for (Map.Entry<String, Pair<PsiElement, Symbol>> entry : this.currentExtractedSymbols.entrySet()){
                     if (entry.getKey().equals(node.getText())){
-                        return entry.getValue().getValue(); //returns the corresponding Symbol
+                        return entry.getValue().getSecond(); //returns the corresponding Symbol
                     }
                 }
             }
@@ -318,14 +320,6 @@ public class GraphGenerator {
         System.out.println(node.getText());
         return null;
     }
-
-
-
-
-    void visitPyNumericLiteralExpression(PsiElement node){
-        this.addTerminal(new TokenNode(node.getText()));
-    }
-
 
 
     void addTerminal(TokenNode tokenNode){
@@ -605,7 +599,24 @@ public class GraphGenerator {
         }
     }
 
+    void visitPyLambdaExpression(PsiElement lambdaNode){
+        this.addTerminal(new TokenNode("lambda"));
+        if (lambdaNode instanceof  PyLambdaExpressionImpl) {
+            PyLambdaExpressionImpl lambdaExpression = (PyLambdaExpressionImpl) lambdaNode;
+            try {
+                this.makeNewScope();
+                this.visit(lambdaExpression.getParameterList());
+                this.addTerminal(new TokenNode(":"));
+                this.visit(lambdaExpression.getBody());
+                this.exitScope();
+            } catch (IllegalArgumentException ignored) {
+
+            }
+        }
+    }
+
     //End Region: PyFunctions
+
 
     //Region: Control Flow
 
@@ -627,11 +638,16 @@ public class GraphGenerator {
             else{
                 visitForStatement(forStatement);
             }
+            if (forStatement.getElsePart() != null){
+                this.addTerminal(new TokenNode("else"));
+                this.visitPyStatementList(forStatement.getElsePart().getStatementList());
+            }
         }
     }
     void visitForStatement(PyForStatementImpl forStatement){
         this.visitFor(forStatement.getForPart());
     }
+
     void visitFor(PsiElement forLoop){
         if (forLoop instanceof PyForPartImpl) {
             PyForPartImpl forPart = (PyForPartImpl) forLoop;
@@ -642,7 +658,13 @@ public class GraphGenerator {
             this.addEdge(forPart.getTarget(), forPart.getSource(), EdgeType.COMPUTED_FROM);
             this.visit(forPart.getStatementList());
         }
+    }
 
+    // End Region: Control Flow
+
+    void visitPyExpressionStatement(PsiElement pyExpressionNode){
+        PyExpressionStatementImpl pyExpressionStatement = (PyExpressionStatementImpl) pyExpressionNode;
+        this.visit(pyExpressionStatement.getExpression());
     }
 
     void visitPyCallExpression(PsiElement callExpressionNode){
@@ -658,8 +680,128 @@ public class GraphGenerator {
                     this.addTerminal(new TokenNode(","));
                 }
             }
+            //TODO: keywords?
             this.addTerminal(new TokenNode(")"));
         }
     }
+
+
+
+
+
+    // Region: Data Structure Constructors
+    void visitPyDictLiteralExpression(PsiElement dictNode){
+        if (dictNode instanceof PyDictLiteralExpressionImpl){
+            PyDictLiteralExpressionImpl dictExpression = (PyDictLiteralExpressionImpl) dictNode;
+            this.addTerminal(new TokenNode("{"));
+            int idx = 0;
+            for (PyKeyValueExpression keyValueExpression : dictExpression.getElements()){
+                if (keyValueExpression.getKey() instanceof PyNoneLiteralExpressionImpl){
+                    this.addTerminal(new TokenNode("None"));
+                }
+                else{
+                    this.visit(keyValueExpression.getKey());
+                }
+                this.addTerminal(new TokenNode(":"));
+                this.visit(keyValueExpression.getValue());
+                if (idx < dictNode.getChildren().length - 1){
+                    this.addTerminal(new TokenNode(","));
+                }
+            }
+            this.addTerminal(new TokenNode("}"));
+        }
+    }
+
+    void visitPyFormattedStringElement(PsiElement formattedStringNode){
+        if (formattedStringNode instanceof  PyFormattedStringElementImpl){
+            PyFormattedStringElement formattedStringElement = (PyFormattedStringElement) formattedStringNode;
+            this.addTerminal(new TokenNode("f\""));
+            //skip the firstChild (= f"), then visit each of its next siblings
+            //this is a workaround
+            PsiElement currentSibling = formattedStringElement.getFirstChild().getNextSibling();
+            while (currentSibling != null){
+                if (currentSibling instanceof LeafPsiElement){
+                    this.visitPyStringLiteralExpression(currentSibling);
+                }
+                else{
+                    this.visit(currentSibling);
+                }
+                currentSibling = currentSibling.getNextSibling();
+            }
+
+        }
+    }
+
+    void visitPyFStringFragment(PsiElement FStringFragmentNode){
+        for (PsiElement formatFragment : FStringFragmentNode.getChildren()){
+            visit(formatFragment);
+        }
+    }
+
+    void visitPyTupleExpression(PsiElement tupleExpressionNode){
+        this.visitSequenceDataStruct(tupleExpressionNode, "(", ")");
+    }
+
+    void visitPySetLiteralExpression(PsiElement setExpressionNode){
+        this.visitSequenceDataStruct(setExpressionNode, "{", "}");
+
+    }
+
+    void visitPyListLiteralExpression(PsiElement listExpressionNode){
+        this.visitSequenceDataStruct(listExpressionNode, "[", "]");
+
+    }
+
+    void visitPyParenthesizedExpression(PsiElement parenthesizedExpressionNode){
+        for(PsiElement element: parenthesizedExpressionNode.getChildren()){
+            this.visit(element);
+        }
+    }
+
+    void visitSequenceDataStruct(PsiElement dataStructNode, String openBrace, String closeBrace){
+        this.addTerminal(new TokenNode(openBrace));
+        for (PsiElement element : dataStructNode.getChildren()){
+            this.visit(element);
+            this.addTerminal(new TokenNode(","));
+        }
+        this.addTerminal(new TokenNode(closeBrace));
+    }
+
+    // End Region
+
+
+    // Region: literals and constructor-likes
+    void visitPyStringLiteralExpression(PsiElement pyStringLiteralNode){
+        if (pyStringLiteralNode instanceof  PyStringLiteralExpressionImpl){
+            PyStringLiteralExpressionImpl string = (PyStringLiteralExpressionImpl) pyStringLiteralNode;
+            if (string.getChildren().length == 0) {
+                this.addTerminal(new TokenNode("\"" + string.getStringValue() + "\""));
+            }
+            // else for formatted strings
+            else{
+                for (PsiElement stringElement : string.getChildren()) {
+                    this.visit(stringElement);
+                }
+            }
+        }
+        else{
+            // only to match string inverted commas for formatted strings
+            if (pyStringLiteralNode.getContext() != null &&
+                    pyStringLiteralNode.isEquivalentTo(pyStringLiteralNode.getContext().getLastChild())) {
+                this.addTerminal(new TokenNode("\"" + "\"" + "\""));
+            }
+            else{
+                this.addTerminal(new TokenNode("\"" + pyStringLiteralNode.getText() + "\""));
+            }
+        }
+    }
+
+    void visitPyNumericLiteralExpression(PsiElement node){
+        this.addTerminal(new TokenNode(node.getText()));
+    }
+
+
+    // End Region
+
 
 }
