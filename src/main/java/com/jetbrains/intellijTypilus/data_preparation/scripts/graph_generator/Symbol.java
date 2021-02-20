@@ -9,6 +9,11 @@ public class Symbol {
     Symbol(PsiElement element){
         this.psiElement = element;
     }
+
+    public Symbol() {
+
+    }
+
     public Unit<String> getSymbol(){
         return Unit.with(this.psiElement.getText());
     }

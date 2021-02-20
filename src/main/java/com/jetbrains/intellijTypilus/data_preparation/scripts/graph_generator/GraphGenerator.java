@@ -147,7 +147,6 @@ public class GraphGenerator {
                             .getClass()
                             .getSimpleName()
                             .equals("PyFileImpl"))) {
-
                     this.addEdge(this.currentParentNode, node, EdgeType.CHILD);
             }
         }
@@ -226,11 +225,20 @@ public class GraphGenerator {
             if (!this.currentExtractedSymbols.containsKey(targetExpression.getReferencedName())) {
                 this.currentExtractedSymbols.put(targetExpression.getReferencedName(), new Pair<>(targetExpression, new Symbol(targetExpression)));
             }
-            this.visitVariableLike(targetExpression, targetExpression.getTextOffset(), true, null, targetExpression.getUseScope());
+            this.visitVariableLike(targetExpression, targetExpression.getTextOffset(), true, null);
         }
         else if (targetExpression.getChildren().length > 0){
 
         }
+
+        //for attributes
+        if (targetExpression.isQualified()){
+            if (targetExpression.getContainingClass() != null && targetExpression.getQualifier().textMatches("self")){
+                this.addEdge(this.currentParentNode, new TokenNode("Attribute"), EdgeType.CHILD);
+
+            }
+        }
+
 
     }
 
@@ -241,7 +249,7 @@ public class GraphGenerator {
             if (!this.currentExtractedSymbols.containsKey(referenceExpression.getReferencedName())) {
                 this.currentExtractedSymbols.put(referenceExpression.getReferencedName(), new Pair<>(referenceExpression, new Symbol(referenceExpression)));
             }
-            this.visitVariableLike(referenceExpression, referenceExpression.getTextOffset(), false, null, referenceExpression.getUseScope());
+            this.visitVariableLike(referenceExpression, referenceExpression.getTextOffset(), false, null);
         }
     }
     
@@ -250,14 +258,14 @@ public class GraphGenerator {
         PsiElement parent = this.currentParentNode;
         this.currentParentNode = node;
         try{
-            this.visitVariableLike(node, startOffset, canAnnotateHere, typeAnnotationNode, node.getUseScope());
+            this.visitVariableLike(node, startOffset, canAnnotateHere, typeAnnotationNode);
         }finally {
             this.currentParentNode = parent;
         }
     }
 
 
-    void visitVariableLike(PsiElement node, int startOffset, boolean canAnnotateHere, TypeAnnotationNode typeAnnotationNode, SearchScope nodeScope){
+    void visitVariableLike(PsiElement node, int startOffset, boolean canAnnotateHere, TypeAnnotationNode typeAnnotationNode){
         HashMap<String, Object> results = getSymbolForName(node, startOffset);
         TokenNode newNode = (TokenNode)results.get("node");
         Symbol symbol = (Symbol)results.get("symbol");
@@ -269,18 +277,19 @@ public class GraphGenerator {
 
     HashMap<String, Object> getSymbolForName(PsiElement node, int startOffset){
         HashMap<String,Object> results = new HashMap<>();
-        TokenNode newNode = new TokenNode(node.getText(), startOffset);
-        this.addTerminal(newNode);
-        //this.extractedTokenNodes.put(node, newNode);
-        //if(!this.currentExtractedSymbols.containsKey(node)) this.currentExtractedSymbols.put(node, new Symbol(node));
-        //this.addTerminal(newNode);
-        //TODO special underscored items
-        results.put("node", newNode);
+        //if (node.)
+            TokenNode newNode = new TokenNode(node.getText(), startOffset);
+            this.addTerminal(newNode);
+            //this.extractedTokenNodes.put(node, newNode);
+            //if(!this.currentExtractedSymbols.containsKey(node)) this.currentExtractedSymbols.put(node, new Symbol(node));
+            //this.addTerminal(newNode);
+            //TODO special underscored items
+            results.put("node", newNode);
 
-        Symbol symbol = getScopeSymbol(node);
-        System.out.println("here");
-        System.out.println(this.currentExtractedSymbols);
-        if (symbol != null) results.put("symbol", symbol);
+            Symbol symbol = getScopeSymbol(node);
+            System.out.println("here");
+            System.out.println(this.currentExtractedSymbols);
+            if (symbol != null) results.put("symbol", symbol);
 
         return results;
     }
@@ -542,7 +551,7 @@ public class GraphGenerator {
             if (!this.currentExtractedSymbols.containsKey(funcNode.getName())) {
                 this.currentExtractedSymbols.put(funcNode.getName(), new Pair<>(funcNode, new Symbol(funcNode)));
             }
-            this.visitVariableLike(funcNode.getNameIdentifier() , node.getTextOffset(), true, null, node.getUseScope());
+            this.visitVariableLike(funcNode.getNameIdentifier() , node.getTextOffset(), true, null);
             PsiElement oldReturnScope = this.returnScope;
             makeNewScope();
             try {
@@ -587,7 +596,7 @@ public class GraphGenerator {
             if (!this.currentExtractedSymbols.containsKey(namedParameter.getName())) {
                 this.currentExtractedSymbols.put(namedParameter.getName(), new Pair<>(namedParameter, new Symbol(namedParameter)));
             }
-            this.visitVariableLike(namedParameter, namedParameter.getTextOffset(), true, null, node.getUseScope());
+            this.visitVariableLike(namedParameter, namedParameter.getTextOffset(), true, null);
         }
     }
 
@@ -803,5 +812,43 @@ public class GraphGenerator {
 
     // End Region
 
+    // Region: ClassDef
+
+    void visitPyClass(PsiElement classDefNode){
+        if (classDefNode instanceof PyClassImpl){
+            PyClassImpl classNode = (PyClassImpl) classDefNode;
+
+            //TODO: inheritance (needs type_lattice_generator.py code)
+            if (classNode.getDecoratorList() != null){
+                for (PyDecorator decorator: classNode.getDecoratorList().getDecorators()){
+                    this.addTerminal(new TokenNode("@"));
+                    this.visit(decorator);
+                }
+            }
+
+            this.addTerminal(new TokenNode("class"));
+            this.addTerminal(new TokenNode(classNode.getName(), classNode.getTextOffset()));
+            PyExpression[] superClassExpressions = classNode.getSuperClassExpressions();
+            if (superClassExpressions.length > 0){
+                this.addTerminal(new TokenNode("("));
+                int i = 0;
+                for (PsiElement superClass : superClassExpressions){
+                    this.visit(superClass);
+                    if (i < superClassExpressions.length - 1 ){
+                        this.addTerminal(new TokenNode(","));
+                    }
+                }
+                this.addTerminal(new TokenNode(")"));
+            }
+
+            this.makeNewScope();
+            try{
+                this.visitPyStatementList(classNode.getStatementList());
+            }finally {
+                this.exitScope();
+            }
+        }
+
+    }
 
 }

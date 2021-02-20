@@ -1,10 +1,14 @@
 package com.jetbrains.intellijTypilus.data_preparation.scripts.graph_generator;
 
-public class StrSymbol {
-    String name;
+import com.intellij.psi.PsiElement;
 
-    StrSymbol(String name){
+public class StrSymbol extends Symbol {
+    String name;
+    PsiElement psiElement;
+
+    StrSymbol(String name, PsiElement psiElement){
         this.name = name;
+        this.psiElement = psiElement;
     }
 
     int hash(){
