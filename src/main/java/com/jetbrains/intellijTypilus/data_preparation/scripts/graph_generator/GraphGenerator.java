@@ -183,7 +183,16 @@ public class GraphGenerator {
             int i = 0;
             while(iterator.hasNext()){
                 PsiElement target = iterator.next();
-                this.visit(target);
+                if (target.getFirstChild() instanceof PyReferenceExpressionImpl){
+                    if (!this.currentExtractedSymbols.containsKey(target.getText())) {
+                        this.currentExtractedSymbols.put(target.getText(), new Pair<>(target, new Symbol(target)));
+                    }
+                    //need to parse type annotation and pass it in the typeAnnotationNode argument below
+                    this.visitVariableLike(target, target.getTextOffset(), true, null);
+                }
+                else {
+                    this.visit(target);
+                }
                 if (i > 0) {
                     this.addEdge(target,assignNode.getAssignedValue(), EdgeType.NEXT);
                 }
@@ -221,23 +230,24 @@ public class GraphGenerator {
 
     void visitPyTargetExpression(PsiElement target){
         PyTargetExpressionImpl targetExpression = (PyTargetExpressionImpl) target;
-        if (targetExpression.getChildren().length == 0) { //when just assigning a raw value to a variable
-            if (!this.currentExtractedSymbols.containsKey(targetExpression.getReferencedName())) {
-                this.currentExtractedSymbols.put(targetExpression.getReferencedName(), new Pair<>(targetExpression, new Symbol(targetExpression)));
-            }
-            this.visitVariableLike(targetExpression, targetExpression.getTextOffset(), true, null);
-        }
-        else if (targetExpression.getChildren().length > 0){
-
-        }
 
         //for attributes
-        if (targetExpression.isQualified()){
-            if (targetExpression.getContainingClass() != null && targetExpression.getQualifier().textMatches("self")){
-                this.addEdge(this.currentParentNode, new TokenNode("Attribute"), EdgeType.CHILD);
-
-            }
+//        if (targetExpression.isQualified()){
+//            if (targetExpression.getContainingClass() != null && targetExpression.getQualifier().textMatches("self")){
+//                this.visit(targetExpression.getFirstChild()); //first child of this will be reference expression 'self'
+//                this.addTerminal(new TokenNode(".", targetExpression.getTextOffset()));
+//                this.addEdge(this.currentParentNode, new TokenNode("Attribute"), EdgeType.CHILD);
+//            }
+//        }
+        //if (targetExpression.getChildren().length == 0) { //when just assigning a raw value to a variable
+        if (!this.currentExtractedSymbols.containsKey(targetExpression.getReferencedName())) {
+            this.currentExtractedSymbols.put(targetExpression.getReferencedName(), new Pair<>(targetExpression, new Symbol(targetExpression)));
         }
+        this.visitVariableLike(targetExpression, targetExpression.getTextOffset(), true, null);
+        //}
+        //else if (targetExpression.getChildren().length > 0){}
+
+
 
 
     }
@@ -267,17 +277,24 @@ public class GraphGenerator {
 
     void visitVariableLike(PsiElement node, int startOffset, boolean canAnnotateHere, TypeAnnotationNode typeAnnotationNode){
         HashMap<String, Object> results = getSymbolForName(node, startOffset);
-        TokenNode newNode = (TokenNode)results.get("node");
-        Symbol symbol = (Symbol)results.get("symbol");
-        if (newNode != null && symbol != null){
-            this.addEdge(newNode, symbol, EdgeType.OCCURRENCE_OF);
+        TokenNode resultNode = null;
+        Symbol resultSymbol = null;
+        if (results.get("node") instanceof TokenNode) {
+            resultNode = (TokenNode) results.get("node");
+        }
+        if (results.get("symbol") instanceof Symbol) {
+            resultSymbol = (Symbol) results.get("symbol");
+        }
+        System.out.println(currentParentNode);
+        if (resultNode != null && resultSymbol != null){
+            this.addEdge(resultNode, resultSymbol, EdgeType.OCCURRENCE_OF);
         }
 
     }
 
-    HashMap<String, Object> getSymbolForName(PsiElement node, int startOffset){
-        HashMap<String,Object> results = new HashMap<>();
-        //if (node.)
+    HashMap<String, Object> getSymbolForName(PsiElement node, int startOffset) {
+        HashMap<String, Object> results = new HashMap<>();
+        if (node.getChildren().length == 0) {
             TokenNode newNode = new TokenNode(node.getText(), startOffset);
             this.addTerminal(newNode);
             //this.extractedTokenNodes.put(node, newNode);
@@ -286,12 +303,42 @@ public class GraphGenerator {
             //TODO special underscored items
             results.put("node", newNode);
 
-            Symbol symbol = getScopeSymbol(node);
+            //symbol = getScopeSymbol(node);
             System.out.println("here");
             System.out.println(this.currentExtractedSymbols);
-            if (symbol != null) results.put("symbol", symbol);
 
+        }
+
+        //If nodes are of form X.Y or X.Y.Z (including attributes with form: self.X
+        else if (node.getFirstChild() instanceof PyReferenceExpressionImpl) {
+            PyReferenceExpression prefix = (PyReferenceExpressionImpl) node.getFirstChild();
+            if (prefix.getReferencedName() != null) {
+                this.visit(prefix);
+                this.addTerminal(new TokenNode(".", node.getTextOffset()));
+
+                // can appear in targetExpression and ReferenceExpression
+                if (node instanceof PyReferenceExpressionImpl) {
+                    PyReferenceExpression refSuffix = (PyReferenceExpressionImpl) node;
+                    this.addTerminal(new TokenNode(refSuffix.getName()));
+                } else if (node instanceof PyTargetExpressionImpl) {
+                    PyTargetExpression targetSuffix = (PyTargetExpressionImpl) node;
+                    this.addTerminal(new TokenNode(targetSuffix.getName()));
+                }
+                if (prefix.getReferencedName().equals("self")) {
+                    //PyAttribute does not exist in PSI
+                    //Only added to match output from Typilus
+                    TokenNode newNode = new TokenNode("PyAttribute", startOffset);
+                    results.put("node", newNode);
+                    this.addEdge(this.currentParentNode, newNode, EdgeType.CHILD);
+                    this.addTerminal(new TokenNode(node.getText(), startOffset));
+                }
+            }
+
+        }
+        Symbol symbol = getScopeSymbol(node);
+        if (symbol != null) results.put("symbol", symbol);
         return results;
+
     }
     //returns [name, node, symbol, symbolType]
 //    HashMap<String, Object> getSymbolForName(PsiElement node, int startOffset){
