@@ -1,8 +1,11 @@
 package com.jetbrains.intellijTypilus.data_preparation.scripts.graph_generator;
+import com.google.gson.*;
+import com.google.gson.reflect.TypeToken;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.LangDataKeys;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiFileFactory;
 import com.intellij.psi.PsiReference;
 import com.intellij.psi.impl.source.tree.LeafPsiElement;
 import com.intellij.psi.impl.source.tree.PsiWhiteSpaceImpl;
@@ -10,6 +13,7 @@ import com.intellij.psi.search.SearchScope;
 import com.intellij.psi.util.PsiElementFilter;
 import com.jetbrains.intellijTypilus.data_preparation.scripts.graph_generator.typeparsing.nodes.TypeAnnotationNode;
 import com.jetbrains.python.PyTokenTypes;
+import com.jetbrains.python.PythonLanguage;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.impl.*;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -17,9 +21,10 @@ import com.intellij.openapi.util.Pair;
 import org.jetbrains.annotations.NotNull;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.regex.*;
 
 
-
+import java.lang.reflect.Type;
 import java.util.*;
 
 public class GraphGenerator {
@@ -27,17 +32,21 @@ public class GraphGenerator {
     //LinkedHashMap<EdgeType, LinkedHashMap<Integer, Set<Integer>>> edges;
     ArrayList<Object> idToNode = new ArrayList<>();
     ArrayList<HashMap<String, Pair<PsiElement, Symbol>>> scopes = new ArrayList<>();
+    ArrayList<HashMap<String, Pair<PsiElement, Symbol>>> allScopes = new ArrayList<>();
     PsiElement returnScope = null;
     TokenNode prevTokenNode = null;
     ArrayList<TokenNode> backboneSequence = new ArrayList<>();
     public LinkedHashMap<Object, Integer> nodeToId = new LinkedHashMap<>();
     public PsiFile psiFile = null;
     public PsiElement currentParentNode = null;
-    HashMap<PsiElement, TokenNode> extractedTokenNodes;
+    LinkedHashMap<Symbol, SymbolInformation> variableLikeSymbols = new LinkedHashMap<>();
+    LinkedHashMap<Symbol, TokenNode> lastLexicalUse = new LinkedHashMap<>();
     HashMap<String, Pair<PsiElement, Symbol>> currentExtractedSymbols = new HashMap<>();
+    HashMap<String, Pair<PsiElement, Symbol>> instanceAttributes = new HashMap<>();
+    HashMap<String, Pair<PsiElement, Symbol>> currentExtractedAttributes = new HashMap<>();
     String INDENT = "<INDENT>";
     String DEDENT = "<DEDENT>";
-    String INLINE = "<NL>";
+    String NLINE = "<NL>";
     HashMap<PyElementType, String> CMPOPS = new HashMap<PyElementType, String>(){{
 
         put(PyTokenTypes.EQEQ, "==");
@@ -77,11 +86,25 @@ public class GraphGenerator {
        //MatMult is missing
     }};
 
+    Pattern IDENTIFIER_REGEX = Pattern.compile("[a-zA-Z_][a-zA-Z0-9_]*");
+
+    List<String> pyKeywords = Arrays.asList("False", "None", "True", "and", "as", "assert", "async", "await", "break",
+            "class", "continue", "def", "del", "elif", "else", "except", "finally",
+            "for", "from", "global", "if", "import", "in", "is", "lambda", "nonlocal",
+            "not", "or", "pass", "raise", "return", "try", "while", "with", "yield");
+
+
 
     public GraphGenerator(AnActionEvent e){
         this.psiFile = e.getData(LangDataKeys.PSI_FILE);
         assert this.psiFile != null;
-        makeNewScope(); //create top level scope
+        this.makeNewScope(); //create top level scope
+    }
+
+    public GraphGenerator(PsiFile psiFile){
+        this.psiFile = psiFile;
+        assert this.psiFile != null;
+        this.makeNewScope(); //create top level scope
     }
 
     public GraphGenerator() {}
@@ -93,6 +116,10 @@ public class GraphGenerator {
     void makeGraphStructure(){
         this.graph.put("nodes", new ArrayList<String>());
         this.graph.put("edges", new LinkedHashMap<EdgeType, LinkedHashMap<String, ArrayList<Integer>>>());
+//        for(EdgeType i: EdgeType.values()){
+//            ((LinkedHashMap<EdgeType, LinkedHashMap<String, ArrayList<Integer>>>) this.graph.get("edges"))
+//                    .put(i, new LinkedHashMap<String, ArrayList<Integer>>());
+//        }
         ((LinkedHashMap<EdgeType, LinkedHashMap<String, ArrayList<Integer>>>) this.graph.get("edges")).put(EdgeType.CHILD, new LinkedHashMap<String, ArrayList<Integer>>());
         ((LinkedHashMap<EdgeType, LinkedHashMap<String, ArrayList<Integer>>>) this.graph.get("edges")).put(EdgeType.NEXT, new LinkedHashMap<String, ArrayList<Integer>>());
         ((LinkedHashMap<EdgeType, LinkedHashMap<String, ArrayList<Integer>>>) this.graph.get("edges")).put(EdgeType.COMPUTED_FROM , new LinkedHashMap<String, ArrayList<Integer>>());
@@ -109,27 +136,31 @@ public class GraphGenerator {
         return graph.toString();
     }
 
-    private PsiElement[] getScopeElements(PsiElement node){
-        PsiElement[] items = PsiTreeUtil.collectElements(node.getFirstChild(), new PsiElementFilter() {
-            @Override
-            public boolean isAccepted(@NotNull PsiElement psiElement) {
-                PyBaseElementImpl pyBaseElement = (PyBaseElementImpl) psiElement;
-                if (((PyBaseElementImpl<?>) psiElement).getElementType() != null) {
-                    return true;
-                }
-                return false;
-            }
-        });
-        return items;
-    }
+//    private PsiElement[] getScopeElements(PsiElement node){
+//        PsiElement[] items = PsiTreeUtil.collectElements(node.getFirstChild(), new PsiElementFilter() {
+//            @Override
+//            public boolean isAccepted(@NotNull PsiElement psiElement) {
+//                PyBaseElementImpl pyBaseElement = (PyBaseElementImpl) psiElement;
+//                if (((PyBaseElementImpl<?>) psiElement).getElementType() != null) {
+//                    return true;
+//                }
+//                return false;
+//            }
+//        });
+//        return items;
+//    }
 
     void makeNewScope(){
         HashMap<String, Pair<PsiElement, Symbol>> newScope = new HashMap<>();
         this.scopes.add(newScope);
+        this.allScopes.add(newScope);
         this.currentExtractedSymbols = newScope;
+
     }
 
     void exitScope(){
+        System.out.println("scccc");
+        System.out.println(this.scopes);
         this.currentExtractedSymbols = this.scopes.get(this.scopes.size()-2);
         this.scopes.remove(this.scopes.size()-1);
     }
@@ -170,10 +201,84 @@ public class GraphGenerator {
         }
     }
 
-    void visitPyFile(PsiElement file){
-        for (PsiElement element : file.getChildren()){
+
+    /**
+     * Visits a Python PSI file to parse and generate the graph for
+     *
+     * @param file The Python PSI file to visit
+     */
+
+    void visitPyFile(PsiElement file) {
+        for (PsiElement element : file.getChildren()) {
             this.visit(element);
         }
+
+        this.addSubtokenOfEdges();
+
+        //add supernodes to graph
+        for (Map.Entry item : this.variableLikeSymbols.entrySet()) {
+            System.out.println("awda");
+            System.out.println(item.getKey().toString() + ((SymbolInformation) item.getValue()).name);
+            System.out.println(parseSymbolInfo((SymbolInformation) item.getValue()));
+            ((LinkedHashMap<String, LinkedHashMap<String, Object>>) this.graph.get("supernodes"))
+                    .put(this.nodeToId.get(item.getKey()).toString(),
+                            parseSymbolInfo((SymbolInformation) item.getValue()));
+        }
+
+        //add backbone sequence to graph
+        for (TokenNode item : this.backboneSequence){
+            ((ArrayList<Integer>) this.graph.get("token-sequence")).add(nodeToId.get(item));
+        }
+
+        //add all the nodes to the graph
+        int i = 0;
+        while (i < this.idToNode.size()) {
+            try {
+                ((ArrayList<String>) this.graph.get("nodes")).add(nodeToLabel(this.idToNode.get(i)));
+            } catch (ClassNotFoundException e) {
+                e.printStackTrace();
+            }
+            i++;
+        }
+
+
+        System.out.println(this.graphToJson());
+        System.out.println("nodess");
+        System.out.println(this.nodeToId);
+    }
+
+    /**
+     * Serializes the main graph to a Json object
+     * @return json representation of the graph as a string
+     */
+    String graphToJson(){
+        //Convert the complex "supernodes" filed first
+        Type supernodesType = new TypeToken<LinkedHashMap<String, LinkedHashMap<String, Object>>>(){}.getType();
+        Gson supernodesGson = new GsonBuilder().serializeNulls().disableHtmlEscaping().create();
+        String supernodes = supernodesGson.toJson(this.graph.get("supernodes"), supernodesType);
+
+        //Create the json of the main graph and replace the supernodes value in for the final json representation
+        Gson gson = new GsonBuilder().disableHtmlEscaping().create();
+        String json = gson.toJson(this.graph);
+        json = json.replace("\"supernodes\":{}", "\"supernodes\":" + supernodes);
+        return json;
+    }
+
+
+
+
+    LinkedHashMap<String, Object> parseSymbolInfo(SymbolInformation sInfo){
+        System.out.println("pawsss");
+        System.out.println(sInfo.name + sInfo.symbolType);
+        Integer firstAnnotatableLocation = Collections.min(sInfo.annotatableLocations.keySet());
+        String annotation = null;
+
+        return new LinkedHashMap<String, Object>(){{
+            put("name", sInfo.name);
+            put("annotation", annotation);
+            put("location", firstAnnotatableLocation);
+            put("type", sInfo.symbolType);
+        }};
     }
 
     void visitPyAssignmentStatement(PsiElement node) {
@@ -183,10 +288,10 @@ public class GraphGenerator {
             int i = 0;
             while(iterator.hasNext()){
                 PsiElement target = iterator.next();
-                if (target.getFirstChild() instanceof PyReferenceExpressionImpl){
-                    if (!this.currentExtractedSymbols.containsKey(target.getText())) {
-                        this.currentExtractedSymbols.put(target.getText(), new Pair<>(target, new Symbol(target)));
-                    }
+                if (isAttribute(target)){
+//                    if (!this.currentExtractedSymbols.containsKey(target.getText())) {
+//                        this.currentExtractedSymbols.put(target.getText(), new Pair<>(target, new Symbol(target)));
+//                    }
                     //need to parse type annotation and pass it in the typeAnnotationNode argument below
                     this.visitVariableLike(target, target.getTextOffset(), true, null);
                 }
@@ -196,7 +301,9 @@ public class GraphGenerator {
                 if (i > 0) {
                     this.addEdge(target,assignNode.getAssignedValue(), EdgeType.NEXT);
                 }
-                this.addEdge(target, assignNode.getAssignedValue(), EdgeType.COMPUTED_FROM);
+                if (!isAttribute(target)) {
+                    this.addEdge(target, assignNode.getAssignedValue(), EdgeType.COMPUTED_FROM);
+                }
                 if (i <  assignNode.getRawTargets().length - 1){
                     this.addTerminal(new TokenNode(","));
                 }
@@ -240,10 +347,15 @@ public class GraphGenerator {
 //            }
 //        }
         //if (targetExpression.getChildren().length == 0) { //when just assigning a raw value to a variable
-        if (!this.currentExtractedSymbols.containsKey(targetExpression.getReferencedName())) {
-            this.currentExtractedSymbols.put(targetExpression.getReferencedName(), new Pair<>(targetExpression, new Symbol(targetExpression)));
+//        if (!this.currentExtractedSymbols.containsKey(targetExpression.getReferencedName())) {
+//            this.currentExtractedSymbols.put(targetExpression.getReferencedName(), new Pair<>(targetExpression, new Symbol(targetExpression)));
+//        }
+        if (isAttribute(targetExpression)) {
+            this.visitVariableLike(targetExpression.getFirstChild(), targetExpression.getFirstChild().getTextOffset(), true, null);
         }
-        this.visitVariableLike(targetExpression, targetExpression.getTextOffset(), true, null);
+        else {
+            this.visitVariableLike(targetExpression, targetExpression.getTextOffset(), true, null);
+        }
         //}
         //else if (targetExpression.getChildren().length > 0){}
 
@@ -256,10 +368,28 @@ public class GraphGenerator {
     void visitPyReferenceExpression(PsiElement referenceExpressionNode) {
         if (referenceExpressionNode instanceof PyReferenceExpressionImpl) {
             PyReferenceExpressionImpl referenceExpression = (PyReferenceExpressionImpl) referenceExpressionNode;
+
             if (!this.currentExtractedSymbols.containsKey(referenceExpression.getReferencedName())) {
                 this.currentExtractedSymbols.put(referenceExpression.getReferencedName(), new Pair<>(referenceExpression, new Symbol(referenceExpression)));
             }
             this.visitVariableLike(referenceExpression, referenceExpression.getTextOffset(), false, null);
+
+
+            System.out.println("refery");
+            System.out.println(referenceExpression.getText());
+//            PsiElement parent = referenceExpression.getParent();
+//            if (parent instanceof PyTargetExpressionImpl ||
+//                parent instanceof PyReferenceExpressionImpl){
+//                if (getScopeSymbol(parent) == null){
+//
+//                    this.visitVariableLike(referenceExpression, referenceExpression.getTextOffset(), false, null);
+//                }
+//            }
+//            else if (getScopeSymbol(referenceExpression) != null){
+//                this.currentExtractedSymbols.put(referenceExpression.getReferencedName(), new Pair<>(referenceExpression, new Symbol(referenceExpression)));
+//                this.visitVariableLike(referenceExpression, referenceExpression.getTextOffset(), false, null);
+//            }
+
         }
     }
     
@@ -275,7 +405,7 @@ public class GraphGenerator {
     }
 
 
-    void visitVariableLike(PsiElement node, int startOffset, boolean canAnnotateHere, TypeAnnotationNode typeAnnotationNode){
+    void visitVariableLike(PsiElement node, int startOffset, boolean canAnnotateHere, TypeAnnotationNode typeAnnotation){
         HashMap<String, Object> results = getSymbolForName(node, startOffset);
         TokenNode resultNode = null;
         Symbol resultSymbol = null;
@@ -285,34 +415,58 @@ public class GraphGenerator {
         if (results.get("symbol") instanceof Symbol) {
             resultSymbol = (Symbol) results.get("symbol");
         }
-        System.out.println(currentParentNode);
         if (resultNode != null && resultSymbol != null){
             this.addEdge(resultNode, resultSymbol, EdgeType.OCCURRENCE_OF);
+
+            SymbolInformation symbolInformation = this.variableLikeSymbols.get(resultSymbol);
+            if (symbolInformation == null && results.get("symbolType") != null){
+                System.out.println("chawss");
+                System.out.println((String)results.get("name") + (String) results.get("symbolType"));
+                symbolInformation = SymbolInformation.create((String)results.get("name"),
+                        (String) results.get("symbolType"));
+                this.variableLikeSymbols.put((Symbol) results.get("symbol"), symbolInformation);
+            }
+            if (symbolInformation != null) {
+                symbolInformation.locations.add(startOffset);
+                if (canAnnotateHere) symbolInformation.annotatableLocations.put(startOffset, typeAnnotation);
+            }
+
+            //generally last lexical use is on nodes of type TokenNode
+            TokenNode lastLexicalUseNode = this.lastLexicalUse.get(resultSymbol);
+            if (lastLexicalUseNode != null){
+                this.addEdge(lastLexicalUseNode, resultNode, EdgeType.LAST_LEXICAL_USE);
+            }
+            this.lastLexicalUse.put(resultSymbol, resultNode);
+            System.out.println("last");
+            System.out.println(lastLexicalUse.size());
+            System.out.println(lastLexicalUse);
         }
 
     }
 
+
+
+
     HashMap<String, Object> getSymbolForName(PsiElement node, int startOffset) {
         HashMap<String, Object> results = new HashMap<>();
-        if (node.getChildren().length == 0) {
+        Symbol symbol = null;
+        if (!isAttribute(node)) {
             TokenNode newNode = new TokenNode(node.getText(), startOffset);
             this.addTerminal(newNode);
-            //this.extractedTokenNodes.put(node, newNode);
-            //if(!this.currentExtractedSymbols.containsKey(node)) this.currentExtractedSymbols.put(node, new Symbol(node));
-            //this.addTerminal(newNode);
             //TODO special underscored items
             results.put("node", newNode);
 
-            //symbol = getScopeSymbol(node);
-            System.out.println("here");
+            symbol = getScopeSymbol(node);
+            System.out.println("here" + node.getText());
             System.out.println(this.currentExtractedSymbols);
-
+            results.put("name", node.getText());
         }
 
-        //If nodes are of form X.Y or X.Y.Z (including attributes with form: self.X
-        else if (node.getFirstChild() instanceof PyReferenceExpressionImpl) {
+        //If nodes are of form X.Y (including attributes with form: self.X)
+        else if (isAttribute(node)) {
             PyReferenceExpression prefix = (PyReferenceExpressionImpl) node.getFirstChild();
-            if (prefix.getReferencedName() != null) {
+            results.put("name", node.getText());
+            if (prefix.getReferencedName() != null ) {
                 this.visit(prefix);
                 this.addTerminal(new TokenNode(".", node.getTextOffset()));
 
@@ -320,23 +474,48 @@ public class GraphGenerator {
                 if (node instanceof PyReferenceExpressionImpl) {
                     PyReferenceExpression refSuffix = (PyReferenceExpressionImpl) node;
                     this.addTerminal(new TokenNode(refSuffix.getName()));
-                } else if (node instanceof PyTargetExpressionImpl) {
+                }
+                else if (node instanceof PyTargetExpressionImpl) {
                     PyTargetExpression targetSuffix = (PyTargetExpressionImpl) node;
                     this.addTerminal(new TokenNode(targetSuffix.getName()));
+
                 }
-                if (prefix.getReferencedName().equals("self")) {
-                    //PyAttribute does not exist in PSI
-                    //Only added to match output from Typilus
-                    TokenNode newNode = new TokenNode("PyAttribute", startOffset);
-                    results.put("node", newNode);
-                    this.addEdge(this.currentParentNode, newNode, EdgeType.CHILD);
+
+                //PyAttribute does not exist in PSI
+                //Only added to match output from Typilus
+                //Adding COMPUTED_FROM edge here as well
+                TokenNode newNode = new TokenNode("PyAttribute", startOffset);
+                results.put("node", newNode);
+                this.addEdge(this.currentParentNode, newNode, EdgeType.CHILD);
+                symbol = getScopeSymbol(node);
+                if (symbol == null) {
                     this.addTerminal(new TokenNode(node.getText(), startOffset));
+                    this.currentExtractedSymbols.put(node.getText(), new Pair<>(node, new Symbol(node)));
                 }
+                if (node.getParent() instanceof PyAssignmentStatementImpl) {
+                    PyAssignmentStatementImpl parentAssignNode = (PyAssignmentStatementImpl) node.getParent();
+                    if (parentAssignNode.getAssignedValue() != null) {
+                        this.addEdge(newNode, parentAssignNode.getAssignedValue(), EdgeType.COMPUTED_FROM);
+                    }
+                }
+
             }
 
         }
-        Symbol symbol = getScopeSymbol(node);
-        if (symbol != null) results.put("symbol", symbol);
+
+        if (symbol != null) {
+            results.put("symbol", symbol);
+            PsiElement symbolsPsiType = symbol.getPsiElement();
+            if (symbolsPsiType instanceof PyTargetExpressionImpl ||
+                symbolsPsiType instanceof PyReferenceExpressionImpl) {
+                results.put("symbolType", "variable");
+            } else if (symbolsPsiType instanceof PyFunctionImpl ||
+                    symbolsPsiType instanceof PyClassImpl) {
+                results.put("symbolType", "classOrFunction");
+                //TODO: imported nad parameter
+            }
+        }
+        System.out.println(results);
         return results;
 
     }
@@ -358,24 +537,41 @@ public class GraphGenerator {
 //    }
 
     Symbol getScopeSymbol(PsiElement node){
-        for (int i = this.scopes.size(); i >= 0; i--) {
-            PsiReference reference = node.getReference();
-            // resolve a variable reference, or find function, or find parameters
-            if (reference != null ||
-                    node.getParent().getClass() == PyFunctionImpl.class ||
-                    node.getClass() == PyNamedParameterImpl.class
-            ) {
-                for (Map.Entry<String, Pair<PsiElement, Symbol>> entry : this.currentExtractedSymbols.entrySet()){
-                    if (entry.getKey().equals(node.getText())){
-                        return entry.getValue().getSecond(); //returns the corresponding Symbol
+        if (!isAttribute(node)) {
+            for (int i = this.scopes.size(); i > 0; i--) {
+                PsiReference reference = node.getReference();
+                // resolve a variable reference, or find function, or find parameters
+                if (reference != null ||
+                        node.getParent().getClass() == PyFunctionImpl.class ||
+                        node.getClass() == PyNamedParameterImpl.class
+                ) {
+                    System.out.println(node.getText() + "innnn");
+                    for (Map.Entry<String, Pair<PsiElement, Symbol>> entry : this.scopes.get(i - 1).entrySet()) {
+                        if (entry.getKey().equals(node.getText())) {
+                            System.out.println("scopeee " + entry.getKey() + " " + entry.getValue().getFirst().getTextOffset());
+                            System.out.println("scopeee " + node.getText() + " " + node.getTextOffset());
+                            return entry.getValue().getSecond(); //returns the corresponding Symbol
+                        }
                     }
                 }
+
             }
         }
+        else if (isAttribute(node)){
+           for (Map.Entry<String, Pair<PsiElement, Symbol>> entry : this.instanceAttributes.entrySet()){
+               if (entry.getKey().equals(node.getText())){
+                   return entry.getValue().getSecond();
+               }
+           }
+        }
+
         System.out.println("printing null node");
         System.out.println(node.getText());
+        System.out.println(allScopes);
         return null;
     }
+
+
 
 
     void addTerminal(TokenNode tokenNode){
@@ -441,7 +637,7 @@ public class GraphGenerator {
         for(PsiElement statement : statements){
             this.visit(statement);
             if (i < statements.length - 1){
-                this.addTerminal(new TokenNode(this.INLINE));
+                this.addTerminal(new TokenNode(this.NLINE));
             }
             if (i > 0){
                 this.addEdge(statements[i-1], statement, EdgeType.NEXT);
@@ -457,9 +653,24 @@ public class GraphGenerator {
             return ((String) node).replace("\n", "");
         }
         else if (node instanceof TokenNode){
+            System.out.println("token node type");
+            System.out.println(((TokenNode) node).token);
             return ((TokenNode) node).token.replace("\n", "");
         }
-        else throw new ClassNotFoundException();
+        else if (node instanceof PsiElement){
+            System.out.println("psi type");
+            System.out.println((PsiElement) node);
+            return ((PsiElement) node).toString();
+        }
+        else if (node instanceof Symbol){
+            System.out.println("symbol type");
+            System.out.println(((Symbol) node).getSymbol());
+            return ((Symbol) node).getSymbol().replace("\n", "");
+        }
+        else {
+            System.out.println(node.getClass());
+            throw new ClassNotFoundException();
+        }
     }
 
 
@@ -492,6 +703,62 @@ public class GraphGenerator {
 //        return idx;
     }
 
+    //Region: Subtoken of edges
+    void addSubtokenOfEdges(){
+        Set<TokenNode> allIdentifierLikeNodes = new HashSet<>();
+        LinkedHashMap<String, TokenNode> subtokenNodes = new LinkedHashMap<>();
+        for (Map.Entry object : this.nodeToId.entrySet()){
+            if (object.getKey() instanceof TokenNode) {
+                if (this.isIdentifierNode(object.getKey())) {
+                    allIdentifierLikeNodes.add((TokenNode)object.getKey());
+                }
+            }
+        }
+
+        for (TokenNode node : allIdentifierLikeNodes){
+            List<String> splitIdentfierIntoParts = new ArrayList<String>(Arrays.asList(node.token.split("_")));
+            splitIdentfierIntoParts.removeAll(Arrays.asList("",null));
+            System.out.println("treeee");
+            System.out.println(splitIdentfierIntoParts);
+
+            for (String subtoken : splitIdentfierIntoParts){
+                TokenNode subtokenDummyNode = subtokenNodes.get(subtoken);
+                if (subtokenDummyNode == null){
+                    subtokenDummyNode = new TokenNode(subtoken);
+
+                    subtokenNodes.put(subtoken, subtokenDummyNode);
+                }
+                this.addEdge(subtokenDummyNode, node, EdgeType.SUBTOKEN_OF);
+
+            }
+        }
+    }
+
+    boolean isIdentifierNode(Object node){
+        final PsiFileFactory factory = PsiFileFactory.getInstance(this.psiFile.getProject());
+        if (!(node instanceof TokenNode)){
+            return false;
+        }
+        if (!this.IDENTIFIER_REGEX.matcher(((TokenNode) node).token).matches()){
+            return false;
+        }
+        if (node.equals(this.INDENT) || node.equals(this.DEDENT) || node.equals(this.NLINE)){
+            return false;
+        }
+        if (pyKeywords.contains(((TokenNode) node).token)){
+            return false;
+        }
+        if (((TokenNode) node).token.equals("")){
+            return false;
+        }
+        if (((TokenNode) node).token.equals("PyAttribute")){
+            return false;
+        }
+        return true;
+    }
+
+
+
     int nodeID(Symbol node) {
         if (this.nodeToId.get(node) == null) {
             int idx = this.nodeToId.size();
@@ -501,16 +768,7 @@ public class GraphGenerator {
             return idx;
         }
         return this.nodeToId.get(node);
-
-//    void addEdge(TokenNode fromNode, TokenNode toNode, EdgeType edgeType) { //need to add edges part
-//        int fromNodeIdx = this.nodeID(fromNode);
-//        int toNodeIdx = this.nodeID(toNode);
-//        System.out.printf("adding edge type: %s", edgeType);
-//        this.edges.get(edgeType).get(fromNodeIdx).add(toNodeIdx);
-//    }
     }
-
-
 
     void addEdge(PsiElement fromNode, PsiElement toNode, EdgeType edgeType) { //need to add edges part
         int fromNodeIdx = this.nodeID(fromNode);
@@ -573,6 +831,24 @@ public class GraphGenerator {
         System.out.println(this.graph);
 
     }
+
+    void addEdge(TokenNode fromNode, PsiElement toNode, EdgeType edgeType) { //need to add edges part
+        int fromNodeIdx = this.nodeID(fromNode);
+        int toNodeIdx = this.nodeID(toNode);
+        if (((LinkedHashMap<EdgeType, LinkedHashMap<String, ArrayList<Integer>>>) this.graph.get("edges"))
+                .get(edgeType).containsKey(Integer.toString(fromNodeIdx))) {
+            ((LinkedHashMap<EdgeType, LinkedHashMap<String, ArrayList<Integer>>>) this.graph.get("edges"))
+                    .get(edgeType).get(Integer.toString(fromNodeIdx)).add(toNodeIdx);
+        } else {
+            ((LinkedHashMap<EdgeType, LinkedHashMap<String, ArrayList<Integer>>>) this.graph.get("edges"))
+                    .get(edgeType)
+                    .put(Integer.toString(fromNodeIdx), new ArrayList<Integer>(Arrays.asList(toNodeIdx)));
+        }
+        System.out.println(this.graph);
+
+    }
+
+
 
     //Region: PyFunctions
 
@@ -859,6 +1135,13 @@ public class GraphGenerator {
 
     // End Region
 
+    boolean isAttribute(PsiElement node){
+        if (node instanceof PyTargetExpressionImpl || node instanceof PyReferenceExpressionImpl){
+            return ((PyQualifiedExpression) node).isQualified();
+        }
+        return false;
+    }
+
     // Region: ClassDef
 
     void visitPyClass(PsiElement classDefNode){
@@ -866,6 +1149,7 @@ public class GraphGenerator {
             PyClassImpl classNode = (PyClassImpl) classDefNode;
 
             //TODO: inheritance (needs type_lattice_generator.py code)
+
             if (classNode.getDecoratorList() != null){
                 for (PyDecorator decorator: classNode.getDecoratorList().getDecorators()){
                     this.addTerminal(new TokenNode("@"));
@@ -889,13 +1173,16 @@ public class GraphGenerator {
             }
 
             this.makeNewScope();
+            //add all instance attributes to current extracted symbols
+            for (PyTargetExpression attribute : classNode.getInstanceAttributes()){
+                this.instanceAttributes.put(attribute.getText(), new Pair<>(attribute, new Symbol(attribute)));
+            }
             try{
                 this.visitPyStatementList(classNode.getStatementList());
             }finally {
                 this.exitScope();
+                this.instanceAttributes.clear();
             }
         }
-
     }
-
 }

@@ -25,4 +25,5 @@ public class NameAnnotationNode extends TypeAnnotationNode {
 //    NameAnnotationNode parse(Object node) {
 //        if (hasattr(node, "identifier")) return NameAnnotationNode(node.identifier);
 //    }
+
 }

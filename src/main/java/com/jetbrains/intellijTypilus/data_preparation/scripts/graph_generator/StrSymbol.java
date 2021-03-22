@@ -7,6 +7,7 @@ public class StrSymbol extends Symbol {
     PsiElement psiElement;
 
     StrSymbol(String name, PsiElement psiElement){
+        super(psiElement);
         this.name = name;
         this.psiElement = psiElement;
     }

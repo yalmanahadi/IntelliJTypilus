@@ -17,11 +17,14 @@
     <depends>PythonCore</depends>
     <extensions defaultExtensionNs="com.intellij">
         <!-- Add your extensions here -->
-
+    <intentionAction>
+        <className>com.jetbrains.intellijTypilus.IntellijTypilusIntention</className>
+        <category>SDK intentions</category>
+    </intentionAction>
     </extensions>
 
     <actions>
-        <action id="com.jetbrains.intellijTypilus.Action" class="com.jetbrains.intellijTypilus.intelliJTypilus" text="Get Type Hints">
+        <action id="com.jetbrains.intellijTypilus.Action" class="com.jetbrains.intellijTypilus.IntelliJTypilus" text="Get Type Hints">
             <add-to-group group-id="ToolbarRunGroup" anchor = "last"/>
         </action>
     </actions>
