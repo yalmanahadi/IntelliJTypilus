@@ -24,7 +24,7 @@
     </extensions>
 
     <actions>
-        <action id="com.jetbrains.intellijTypilus.Action" class="com.jetbrains.intellijTypilus.IntelliJTypilus" text="Get Type Hints">
+        <action id="com.jetbrains.intellijTypilus.Action" class="com.jetbrains.intellijTypilus.IntelliJTypilus" text="Get Typilus Type Hints">
             <add-to-group group-id="ToolbarRunGroup" anchor = "last"/>
         </action>
     </actions>
