@@ -47,7 +47,6 @@ public class IntellijTypilusIntention extends PsiElementBaseIntentionAction {
             GraphGenerator graphGenerator = new GraphGenerator(psiFile);
             graphGenerator.build();
             graphGenerator.visit(psiFile);
-            System.out.println(graphGenerator.nodeToId);
         }
         final PsiFileFactory factory = PsiFileFactory.getInstance(project);
 
@@ -92,6 +91,19 @@ public class IntellijTypilusIntention extends PsiElementBaseIntentionAction {
             }
         }
 
+        else if (element.getContext() instanceof PyNamedParameterImpl){
+            PyNamedParameterImpl namedParameter = (PyNamedParameterImpl) element.getContext();
+            if (namedParameter.getAnnotation() == null){
+                String parameterName = namedParameter.getName();
+                String annotation = ": Any ";
+                PsiElement annotationFile = factory.createFileFromText("newfile",
+                        PythonLanguage.getInstance(), parameterName + annotation);
+                assert psiFile != null;
+
+                namedParameter.replace(annotationFile.getFirstChild());
+            }
+        }
+
     }
 
 
@@ -103,7 +115,8 @@ public class IntellijTypilusIntention extends PsiElementBaseIntentionAction {
     public boolean isAvailable(@NotNull Project project, Editor editor, @NotNull PsiElement element) {
         PsiElement context = element.getContext();
         if (context instanceof PyTargetExpressionImpl  && context.getContext() instanceof PyAssignmentStatementImpl ||
-            context instanceof PyFunction){
+            context instanceof PyFunctionImpl ||
+            context instanceof PyNamedParameterImpl){
             return true;
         }
 
