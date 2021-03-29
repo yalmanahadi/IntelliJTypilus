@@ -17,10 +17,10 @@ import com.jetbrains.python.PythonLanguage;
 import com.jetbrains.python.psi.PyFunction;
 import com.jetbrains.python.psi.PyPsiFacade;
 import com.jetbrains.python.psi.PyTargetExpression;
-import com.jetbrains.python.psi.impl.PyAssignmentStatementImpl;
-import com.jetbrains.python.psi.impl.PyParameterListImpl;
-import com.jetbrains.python.psi.impl.PyTargetExpressionImpl;
+import com.jetbrains.python.psi.impl.*;
 import org.jetbrains.annotations.NotNull;
+
+import java.util.Arrays;
 
 public class IntellijTypilusIntention extends PsiElementBaseIntentionAction {
 
@@ -50,16 +50,46 @@ public class IntellijTypilusIntention extends PsiElementBaseIntentionAction {
             System.out.println(graphGenerator.nodeToId);
         }
         final PsiFileFactory factory = PsiFileFactory.getInstance(project);
-        if (element.getContext() instanceof PyTargetExpressionImpl) {
-            PsiElement annotation = factory.createFileFromText("newFile", PythonLanguage.getInstance(), ": Any");
-            assert psiFile != null;
-            psiFile.addAfter(annotation, element.getContext());
+
+        if (element.getContext() instanceof PyTargetExpressionImpl && element.getContext().getContext() instanceof PyAssignmentStatementImpl) {
+            if (((PyTargetExpressionImpl) element.getContext()).getAnnotation() == null) {
+
+                PyTargetExpressionImpl target = (PyTargetExpressionImpl) element.getContext();
+                PyAssignmentStatementImpl assignmentStatement = (PyAssignmentStatementImpl) target.getContext();
+
+                if (assignmentStatement != null && assignmentStatement.getAssignedValue() != null) {
+
+                    //change this annotation text to match the correct annotation text from Typilus predictions
+                    //putting the equal symbol after the annotation helps
+                    String annotation = ": Any = ";
+                    PyFileImpl annotationFile = (PyFileImpl)
+                            factory.createFileFromText("newFile", PythonLanguage.getInstance(),
+                                    element.getText() + annotation +
+                                            assignmentStatement.
+                                                    getAssignedValue().getText());
+                    assert psiFile != null;
+
+                    //annotationFile will have one child which will be the annotated assignment statement
+                    assignmentStatement.replace(annotationFile.getFirstChild());
+                }
+            }
         }
-        else if (element.getContext() instanceof PyFunction){
-            PsiElement annotation = factory.createFileFromText("newFile", PythonLanguage.getInstance(), "-> Any");
-            PsiElement afterParameterList = PsiTreeUtil.getChildOfType(element.getContext(), PyParameterListImpl.class);
-            assert psiFile != null;
-            psiFile.addAfter(annotation, afterParameterList);
+        else if (element.getContext() instanceof PyFunctionImpl){
+            PyFunctionImpl function = (PyFunctionImpl) element.getContext();
+            if (function.getAnnotation() == null) {
+                String funcText = function.getText();
+                PsiElement afterParameterList = PsiTreeUtil.getChildOfType(function, PyParameterListImpl.class);
+                assert afterParameterList != null;
+                String annotation = "-> Any";
+                int annotationIndex = afterParameterList.getTextLength() + afterParameterList.getTextOffset();
+                funcText = funcText.substring(0, afterParameterList.getTextOffset() + afterParameterList.getTextLength())
+                        + annotation + funcText.substring(annotationIndex);
+                PsiElement annotationFile = factory.createFileFromText("newFile", PythonLanguage.getInstance(), funcText);
+                assert psiFile != null;
+
+                //annotationFile will have only one child which will be the new annotated function
+                function.replace(annotationFile.getFirstChild());
+            }
         }
 
     }
