@@ -154,7 +154,7 @@ public class GraphGenerator {
 
     /**
      * Main visit method which generates the specific visit method name for each Psi Element
-     * @param node
+     * @param node Recieves any Psi Element
      */
 
     public void visit(PsiElement node) {
@@ -386,7 +386,7 @@ public class GraphGenerator {
 
     /**
      * Visits PyStatementList
-     * @param node
+     * @param node The Psi Element for the PyStatementList
      */
     void visitPyStatementList(PsiElement node){
         PsiElement[] statements = node.getChildren();
@@ -1020,7 +1020,7 @@ public class GraphGenerator {
      * Assert is assumed to have two PSI arguments:
      *      - the first being the test/argument
      *      - the second being the error
-     * @param node
+     * @param node The Psi Element for the PyAssertStatement
      */
     void visitPyAssertStatement(PsiElement node){
         if (node instanceof PyAssertStatementImpl){
@@ -1099,7 +1099,7 @@ public class GraphGenerator {
             this.addTerminal(new TokenNode("["));
             this.visit(sliceExpression.getSliceItem());
             PsiElement sibling = sliceExpression.getSliceItem();
-            while (sibling.getNextSibling() != null){
+            while (sibling != null && sibling.getNextSibling() != null){
                 if (sibling.getNextSibling() instanceof PySliceItem) {
                     this.visit(sibling.getNextSibling());
                 }
@@ -1150,6 +1150,10 @@ public class GraphGenerator {
     //TODO: Starred expressions
     //TODO: visit aliases, requires parsing type annotations
 
+    /**
+     * Visits PyGlobalStatement. Visits multiple global identifiers given in one line
+     * @param node The Psi Element for the PyGlobalStatement
+     */
     void visitPyGlobalStatement(PsiElement node) {
         if (node instanceof PyGlobalStatementImpl) {
             this.addTerminal(new TokenNode("global"));
@@ -1166,6 +1170,10 @@ public class GraphGenerator {
         this.addTerminal(new TokenNode("pass"));
     }
 
+    /**
+     * Visits PyNonlocalStatement
+     * @param node The Psi Element for the PyNonlocalStatement
+     */
     void visitPyNonlocalStatement(PsiElement node){
         if (node instanceof PyNonlocalStatement) {
             this.addTerminal(new TokenNode("nonlocal"));
@@ -1183,6 +1191,11 @@ public class GraphGenerator {
 
 
     // Region: Data Structure Constructors
+
+    /**
+     * Visits PyDictLiteralExpression
+     * @param dictNode The Psi Element for the PyDictLiteral Expression
+     */
     void visitPyDictLiteralExpression(PsiElement dictNode){
         if (dictNode instanceof PyDictLiteralExpressionImpl){
             PyDictLiteralExpressionImpl dictExpression = (PyDictLiteralExpressionImpl) dictNode;
@@ -1205,6 +1218,10 @@ public class GraphGenerator {
         }
     }
 
+    /**
+     * Visits PyFormattedStringElement
+     * @param formattedStringNode The Psi Element of the PyFormattedString
+     */
     void visitPyFormattedStringElement(PsiElement formattedStringNode){
         if (formattedStringNode instanceof  PyFormattedStringElementImpl){
             PyFormattedStringElement formattedStringElement = (PyFormattedStringElement) formattedStringNode;
@@ -1251,6 +1268,12 @@ public class GraphGenerator {
         }
     }
 
+    /**
+     * Generic data structure visitor
+     * @param dataStructNode The Psi Element for the data structure to be visited
+     * @param openBrace The open brace character as a String
+     * @param closeBrace The close brace character as a String
+     */
     void visitSequenceDataStruct(PsiElement dataStructNode, String openBrace, String closeBrace){
         this.addTerminal(new TokenNode(openBrace));
         for (PsiElement element : dataStructNode.getChildren()){
@@ -1264,6 +1287,11 @@ public class GraphGenerator {
 
 
     // Region: Literals and constructor-likes
+
+    /**
+     * Visits PyStringLiteralExpression
+     * @param pyStringLiteralNode The Psi Element for the PyStringLiteralExpression
+     */
     void visitPyStringLiteralExpression(PsiElement pyStringLiteralNode){
         if (pyStringLiteralNode instanceof  PyStringLiteralExpressionImpl){
             PyStringLiteralExpressionImpl string = (PyStringLiteralExpressionImpl) pyStringLiteralNode;
@@ -1514,8 +1542,6 @@ public class GraphGenerator {
             }
         }
 
-        //System.out.println("printing null node");
-        //System.out.println(node.getText());
         return null;
     }
 
